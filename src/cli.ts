@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 
@@ -9,7 +8,6 @@ type Branch = {
   timestamp: number;
   subject: string;
   current: boolean;
-  upstream?: string;
   ahead: number;
   behind: number;
   ageDays: number;
@@ -23,18 +21,13 @@ function git(args: string[]): string {
 }
 
 function showHelp(): void {
-  console.log(`
-🪡 BRANCHWEAVER — inspect the shape of your Git branches
-
-Usage:
-  branchweaver [options]
+  console.log(`Usage: branchweaver [--all] [--json] [--sort recent|oldest|name] [--help]
 
 Options:
-  --all                  Include remote branches
-  --json                 Output branch data as JSON
-  --sort <order>         Sort by recent, oldest, or name
-  --help                 Show this help
-`);
+  --all          Include remote branches
+  --json         Output JSON
+  --sort <order> Sort by recent, oldest, or name
+  --help         Show help`);
 }
 
 function main(): void {
@@ -49,7 +42,7 @@ function main(): void {
   const sort = sortIndex >= 0 ? args[sortIndex + 1] : "recent";
 
   if (!["recent", "oldest", "name"].includes(sort)) {
-    console.error("--sort must be recent, oldest, or name.");
+    console.error("Invalid sort order. Use recent, oldest, or name.");
     process.exitCode = 1;
     return;
   }
@@ -57,7 +50,7 @@ function main(): void {
   try {
     git(["rev-parse", "--git-dir"]);
   } catch {
-    console.error("Branchweaver must be run inside a Git repository.");
+    console.error("Run branchweaver inside a Git repository.");
     process.exitCode = 1;
     return;
   }
@@ -67,7 +60,7 @@ function main(): void {
   try {
     currentBranch = git(["branch", "--show-current"]);
   } catch {
-    // The repository may be in a detached HEAD state.
+    // Detached HEAD.
   }
 
   const refs = args.includes("--all")
@@ -75,7 +68,7 @@ function main(): void {
     : ["refs/heads"];
 
   const format =
-    "%(refname:short)%09%(objectname:short)%09%(committerdate:unix)%09%(subject)%09%(HEAD)%09%(upstream:short)";
+    "%(refname:short)%09%(objectname:short)%09%(committerdate:unix)%09%(subject)%09%(HEAD)";
 
   let rows: string[];
 
@@ -91,7 +84,7 @@ function main(): void {
 
   const branches: Branch[] = rows
     .map((row) => {
-      const [name, hash, time, subject, head, upstream] = row.split("\t");
+      const [name, hash, time, subject, head] = row.split("\t");
       const timestamp = Number(time) || 0;
 
       return {
@@ -100,7 +93,6 @@ function main(): void {
         timestamp,
         subject: subject || "(no subject)",
         current: head === "*" || name === currentBranch,
-        ...(upstream ? { upstream } : {}),
         ahead: 0,
         behind: 0,
         ageDays: Math.max(0, Math.floor((now - timestamp) / 86400))
@@ -122,7 +114,7 @@ function main(): void {
           branch.behind = counts[0] || 0;
           branch.ahead = counts[1] || 0;
         } catch {
-          // Branch histories may be unrelated.
+          // Leave counts at zero for unrelated histories.
         }
       }
 
@@ -147,36 +139,19 @@ function main(): void {
     return;
   }
 
-  console.log(
-    `\n🪡 BRANCHWEAVER ${
-      currentBranch ? `· current: ${currentBranch}` : "· detached HEAD"
-    }`
-  );
-  console.log("─".repeat(78));
+  console.log(`Branches${currentBranch ? ` (current: ${currentBranch})` : ""}`);
+  console.log("NAME                           AGE       AHEAD/BEHIND  HASH     SUBJECT");
 
   for (const branch of branches) {
-    const marker =
-      branch.ageDays < 7 ? "✦" : branch.ageDays < 30 ? "◌" : "☄";
-
-    const age =
-      branch.ageDays === 0 ? "today" : `${branch.ageDays}d ago`;
-
+    const age = branch.ageDays === 0 ? "today" : `${branch.ageDays}d ago`;
     const relation = branch.current
       ? "current"
       : `+${branch.ahead}/-${branch.behind}`;
 
-    const name = branch.current
-      ? `\x1b[1;36m${branch.name}\x1b[0m`
-      : branch.name;
-
     console.log(
-      `${marker} ${name.padEnd(28)} ${age.padEnd(9)} ${relation.padEnd(12)} ${branch.hash}  ${branch.subject.slice(0, 40)}`
+      `${branch.name.padEnd(30)} ${age.padEnd(9)} ${relation.padEnd(13)} ${branch.hash.padEnd(8)} ${branch.subject.slice(0, 40)}`
     );
   }
-
-  console.log(
-    "\n✦ active <7d   ◌ quiet <30d   ☄ stale ≥30d   +ahead/-behind vs current\n"
-  );
 }
 
 main();
